@@ -15,122 +15,136 @@ public class ReportServiceImpl implements ReportService {
 
     @Override
     public List<Expense> getExpensesByCategory(User user, Category category) {
-        String sql = "SELECT amount, expense_date, description " +
+        List<Expense> expenses = new ArrayList<>();
+        String sql = "SELECT id, amount, expense_date, category_id, description " +
                 "FROM expenses WHERE user_id = ? AND category_id = ? " +
                 "ORDER BY expense_date DESC";
-
-        List<Expense> list = new ArrayList<>();
 
         try (Connection conn = DBConnUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, user.getId());
-            ps.setInt(2, Integer.parseInt(category.getCategoryId()));
+            ps.setInt(2, category.getId());
 
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     Expense e = new Expense();
                     e.setAmount(rs.getDouble("amount"));
-                    e.setDate(rs.getDate("expense_date").toLocalDate());
-                    e.setCategory(category);
+                    Date d = rs.getDate("expense_date");
+                    if (d != null) {
+                        e.setDate(d.toLocalDate());
+                    }
                     e.setDescription(rs.getString("description"));
-                    list.add(e);
+
+                    Category c = new Category();
+                    c.setId(rs.getInt("category_id"));
+                    e.setCategory(c);
+
+                    expenses.add(e);
                 }
             }
 
         } catch (SQLException e) {
+            System.out.println("❌ Error loading expenses.");
             e.printStackTrace();
         }
-        return list;
+
+        return expenses;
     }
 
     @Override
     public void displayExpenseReport(User user) {
-        String sql = "SELECT c.name AS category, SUM(e.amount) AS total " +
-                "FROM expenses e JOIN categories c ON e.category_id = c.id " +
-                "WHERE e.user_id = ? " +
-                "GROUP BY c.name ORDER BY total DESC";
+        LocalDate firstOfMonth = LocalDate.now().withDayOfMonth(1);
 
-        System.out.println("==== Expense Report ====");
+        String sql = "SELECT c.id, c.name, " +
+                "       COALESCE(b.monthly_amount, 0) AS budget, " +
+                "       COALESCE(SUM(e.amount), 0)    AS spent " +
+                "FROM categories c " +
+                "LEFT JOIN budgets b " +
+                "  ON b.category_id = c.id AND b.user_id = ? " +
+                "LEFT JOIN expenses e " +
+                "  ON e.category_id = c.id AND e.user_id = ? AND e.expense_date >= ? " +
+                "GROUP BY c.id, c.name, b.monthly_amount " +
+                "ORDER BY c.name ASC";
+
+        System.out.println();
+        System.out.println("===== 📊 EXPENSE REPORT (This Month) =====");
+        System.out.printf("%-12s %-10s %-10s %-12s %-12s%n",
+                "Category", "Budget", "Spent", "Remaining", "Status");
+        System.out.println("--------------------------------------------------------------");
+
+        double totalBudget = 0.0;
+        double totalSpent = 0.0;
 
         try (Connection conn = DBConnUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, user.getId());
+            ps.setInt(2, user.getId());
+            ps.setDate(3, Date.valueOf(firstOfMonth));
 
             try (ResultSet rs = ps.executeQuery()) {
+                boolean anyRow = false;
+
                 while (rs.next()) {
-                    String cat = rs.getString("category");
-                    double total = rs.getDouble("total");
-                    System.out.printf("%-15s : %.2f%n", cat, total);
+                    anyRow = true;
+                    String name = rs.getString("name");
+                    double budget = rs.getDouble("budget");
+                    double spent = rs.getDouble("spent");
+                    double remaining = budget - spent;
+
+                    totalBudget += budget;
+                    totalSpent += spent;
+
+                    String statusEmoji;
+                    String statusText;
+
+                    if (budget == 0 && spent == 0) {
+                        statusEmoji = "•";
+                        statusText = "No activity";
+                    } else if (budget == 0 && spent > 0) {
+                        statusEmoji = "⚠️";
+                        statusText = "No budget";
+                    } else if (remaining < 0) {
+                        statusEmoji = "❌";
+                        statusText = "Exceeded";
+                    } else if (remaining == 0) {
+                        statusEmoji = "⚠️";
+                        statusText = "At limit";
+                    } else {
+                        statusEmoji = "✅";
+                        statusText = "OK";
+                    }
+
+                    System.out.printf("%-12s %-10.2f %-10.2f %-12.2f %-2s %-10s%n",
+                            name, budget, spent, remaining, statusEmoji, statusText);
                 }
+
+                if (!anyRow) {
+                    System.out.println("ℹ️ No categories or expenses found yet.");
+                }
+
             }
 
         } catch (SQLException e) {
+            System.out.println("❌ Error generating report.");
             e.printStackTrace();
         }
+
+        System.out.println("--------------------------------------------------------------");
+        double remainingTotal = totalBudget - totalSpent;
+        System.out.printf("🧮 TOTAL BUDGET : %.2f%n", totalBudget);
+        System.out.printf("💸 TOTAL SPENT  : %.2f%n", totalSpent);
+        System.out.printf("💼 TOTAL REMAIN : %.2f%n", remainingTotal);
     }
 
     @Override
     public void analyzeSpendingPatterns(User user) {
-        // Simple example: show last 7 days vs previous 7 days
-        System.out.println("==== Spending Analysis (simple) ====");
-
-        String sql = "SELECT " +
-                "  CASE WHEN expense_date >= CURDATE() - INTERVAL 7 DAY THEN 'Last 7 Days' " +
-                "       WHEN expense_date >= CURDATE() - INTERVAL 14 DAY THEN 'Previous 7 Days' " +
-                "  END AS period, " +
-                "  SUM(amount) AS total " +
-                "FROM expenses " +
-                "WHERE user_id = ? " +
-                "  AND expense_date >= CURDATE() - INTERVAL 14 DAY " +
-                "GROUP BY period";
-
-        try (Connection conn = DBConnUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setInt(1, user.getId());
-
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    System.out.printf("%s : %.2f%n",
-                            rs.getString("period"),
-                            rs.getDouble("total"));
-                }
-            }
-
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        System.out.println("🔍 Spending analysis feature not fully implemented yet.");
     }
 
     @Override
     public void recommendSavingsAreas(User user) {
-        // Very simple: list top 3 categories by spend this month
-        String sql = "SELECT c.name AS category, SUM(e.amount) AS total " +
-                "FROM expenses e JOIN categories c ON e.category_id = c.id " +
-                "WHERE e.user_id = ? " +
-                "  AND YEAR(e.expense_date) = YEAR(CURDATE()) " +
-                "  AND MONTH(e.expense_date) = MONTH(CURDATE()) " +
-                "GROUP BY c.name ORDER BY total DESC LIMIT 3";
-
-        System.out.println("==== Suggested Areas to Cut Spending ====");
-
-        try (Connection conn = DBConnUtil.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
-
-            ps.setInt(1, user.getId());
-
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    System.out.printf("- %s (%.2f)%n",
-                            rs.getString("category"),
-                            rs.getDouble("total"));
-                }
-            }
-
-        } catch (SQLException e) {
-            e.printStackTrace();
-        }
+        System.out.println("💡 Savings recommendation feature not fully implemented yet.");
     }
 }

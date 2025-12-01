@@ -22,11 +22,9 @@ public class BudgetServiceImpl implements BudgetService {
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, user.getId());
-            ps.setInt(2, Integer.parseInt(category.getCategoryId()));
+            ps.setInt(2, category.getId());
             ps.setDouble(3, amount);
-
             ps.executeUpdate();
-            System.out.println("Budget set for category " + category.getCategoryName());
 
         } catch (SQLException e) {
             e.printStackTrace();
@@ -35,24 +33,23 @@ public class BudgetServiceImpl implements BudgetService {
 
     @Override
     public double getTotalBudget(User user) {
-        String sql = "SELECT COALESCE(SUM(monthly_amount), 0) AS total " +
-                "FROM budgets WHERE user_id = ?";
+        String sql = "SELECT SUM(monthly_amount) AS total FROM budgets WHERE user_id = ?";
+        double total = 0.0;
 
         try (Connection conn = DBConnUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, user.getId());
-
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return rs.getDouble("total");
+                    total = rs.getDouble("total");
                 }
             }
-
         } catch (SQLException e) {
             e.printStackTrace();
         }
-        return 0.0;
+
+        return total;
     }
 
     @Override
@@ -61,58 +58,92 @@ public class BudgetServiceImpl implements BudgetService {
                 "FROM budgets b JOIN categories c ON b.category_id = c.id " +
                 "WHERE b.user_id = ?";
 
-        List<Budget> list = new ArrayList<>();
+        List<Budget> budgets = new ArrayList<>();
 
         try (Connection conn = DBConnUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, user.getId());
-
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    Budget budget = new Budget();
-                    Category cat = new Category();
-                    cat.setCategoryId(String.valueOf(rs.getInt("category_id")));
-                    cat.setCategoryName(rs.getString("name"));
+                    Category category = new Category();
+                    int catId = rs.getInt("category_id");
+                    category.setId(catId);
+                    category.setCategoryId(String.valueOf(catId));
+                    category.setCategoryName(rs.getString("name"));
 
-                    budget.setCategory(cat);
+                    Budget budget = new Budget();
+                    budget.setCategory(category);
                     budget.setMonthlyAmount(rs.getDouble("monthly_amount"));
 
-                    list.add(budget);
+                    budgets.add(budget);
                 }
             }
 
         } catch (SQLException e) {
             e.printStackTrace();
         }
-        return list;
+
+        return budgets;
     }
 
     @Override
     public void updateBudget(User user, Category category, double newAmount) {
-        setMonthlyBudget(user, category, newAmount);
+        String sql = "UPDATE budgets SET monthly_amount = ? WHERE user_id = ? AND category_id = ?";
+
+        try (Connection conn = DBConnUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setDouble(1, newAmount);
+            ps.setInt(2, user.getId());
+            ps.setInt(3, category.getId());
+            ps.executeUpdate();
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
     }
 
     @Override
     public double getCategoryBudget(User user, Category category) {
-        String sql = "SELECT monthly_amount FROM budgets " +
-                "WHERE user_id = ? AND category_id = ?";
+        String sql = "SELECT monthly_amount FROM budgets WHERE user_id = ? AND category_id = ?";
+        double amount = 0.0;
 
         try (Connection conn = DBConnUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, user.getId());
-            ps.setInt(2, Integer.parseInt(category.getCategoryId()));
-
+            ps.setInt(2, category.getId());
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return rs.getDouble("monthly_amount");
+                    amount = rs.getDouble("monthly_amount");
                 }
             }
 
         } catch (SQLException e) {
             e.printStackTrace();
         }
-        return 0.0;
+
+        return amount;
+    }
+
+    @Override
+    public boolean removeBudget(User user, Category category) {
+        String sql = "DELETE FROM budgets WHERE user_id = ? AND category_id = ?";
+
+        try (Connection conn = DBConnUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, user.getId());
+            ps.setInt(2, category.getId());
+            int rows = ps.executeUpdate();
+
+            return rows > 0;
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+
+        return false;
     }
 }

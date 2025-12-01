@@ -3,7 +3,13 @@ package dao.impl;
 import dao.*;
 import entity.Category;
 import entity.User;
+import util.DBConnUtil;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Scanner;
 
@@ -38,22 +44,16 @@ public class ApplicationServiceImpl implements ApplicationService {
     @Override
     public void showMainMenu(User user) {
         while (true) {
-            System.out.println("\n===== Main Menu =====");
-            System.out.println("1. Record a Payment");
-            System.out.println("2. Extend/Edit Budget");
-            System.out.println("3. View Reports");
-            System.out.println("4. Savings Goal");
-            System.out.println("5. Loan Management");
-            System.out.println("6. Exit");
-            System.out.print("Choose an option: ");
+            System.out.println();
+            System.out.println("===== 🏠 MAIN MENU =====");
+            System.out.println("1. 🧾 Record a Payment");
+            System.out.println("2. 💰 Extend/Edit Budget");
+            System.out.println("3. 📊 View Reports");
+            System.out.println("4. 🎯 Savings Goals");
+            System.out.println("5. 🏦 Loan Management");
+            System.out.println("6. 🚪 Exit");
 
-            int choice;
-            try {
-                choice = Integer.parseInt(scanner.nextLine());
-            } catch (NumberFormatException e) {
-                System.out.println("Invalid input. Please enter a number.");
-                continue;
-            }
+            int choice = readInt("➡ Choose an option: ");
 
             switch (choice) {
                 case 1 -> handleRecordPayment(user);
@@ -65,166 +65,294 @@ public class ApplicationServiceImpl implements ApplicationService {
                     exitApplication();
                     return;
                 }
-                default -> System.out.println("Invalid option. Try again.");
+                default -> System.out.println("❌ Invalid option. Enter 1-6.");
             }
         }
     }
 
+    // ===================== RECORD PAYMENT =====================
+
     private void handleRecordPayment(User user) {
-        System.out.print("Enter amount: ");
-        double amount;
-        try {
-            amount = Double.parseDouble(scanner.nextLine());
-        } catch (NumberFormatException e) {
-            System.out.println("❌ Invalid amount.");
-            return;
-        }
 
-        System.out.print("Enter date (YYYY-MM-DD): ");
-        String dateStr = scanner.nextLine();
-
+        System.out.println("\n🧾 Record a Payment");
         Category category = chooseCategoryFromMenu();
         if (category == null) {
-            System.out.println("No category selected. Cancelling payment.");
+            System.out.println("❌ Payment cancelled.");
             return;
         }
 
-        // record expense
-        expenseService.recordExpense(user, amount, dateStr, category);
+        double monthlyBudget = budgetService.getCategoryBudget(user, category);
+        if (monthlyBudget <= 0) {
+            System.out.println("\n⚠️ No monthly budget set for '" + category.getCategoryName() + "'.");
+            System.out.println("1. 💰 Set a budget now");
+            System.out.println("2. ➡ Continue without budget");
+            int choice = readInt("Choose: ");
+            if (choice == 1) {
+                handleEditBudget(user);
+                return;
+            }
+        }
 
-        // alerts
-        alertService.alertIfExceededDailyBudget(user, category);
-        alertService.alertIfExceededMonthlyBudget(user, category);
+        double amount = readPositiveDouble("💵 Enter amount: ");
+        String today = LocalDate.now().toString();
+
+        expenseService.recordExpense(user, amount, today, category);
+        System.out.println("✅ Expense recorded successfully on " + today + ".");
+
+        if (monthlyBudget > 0) {
+            alertService.alertIfExceededDailyBudget(user, category);
+            alertService.alertIfExceededMonthlyBudget(user, category);
+        }
     }
+
+    // ===================== EDIT BUDGET =====================
+
+    private void handleEditBudget(User user) {
+
+        System.out.println("\n💰 Extend/Edit Budget");
+        Category category = chooseCategoryFromMenu();
+        if (category == null) {
+            System.out.println("❌ Operation cancelled.");
+            return;
+        }
+
+        double currentBudget = budgetService.getCategoryBudget(user, category);
+
+        System.out.println("\n📂 Category: " + category.getCategoryName());
+        if (currentBudget > 0)
+            System.out.println("📌 Current monthly budget: ₹" + currentBudget);
+        else
+            System.out.println("⚠️ No budget set for this category.");
+
+        System.out.println("\nWhat would you like to do?");
+        System.out.println("1. ✏ Update Budget");
+        System.out.println("2. 🗑 Remove Budget");
+        System.out.println("3. ❌ Cancel");
+
+        int choice = readInt("Choose: ");
+
+        switch (choice) {
+            case 1 -> {
+                double newAmount = readPositiveDouble("💵 Enter new MONTHLY budget: ");
+                budgetService.updateBudget(user, category, newAmount);
+                System.out.println("✅ Budget updated successfully!");
+            }
+            case 2 -> {
+                if (currentBudget <= 0) {
+                    System.out.println("❌ No existing budget to remove.");
+                    return;
+                }
+                System.out.print("⚠️ Are you sure you want to DELETE budget for "
+                        + category.getCategoryName() + "? (yes/no): ");
+
+                String confirm = scanner.nextLine().trim().toLowerCase();
+                if (confirm.equals("yes")) {
+                    boolean removed = budgetService.removeBudget(user, category);
+                    if (removed) {
+                        System.out.println("🗑 Budget removed successfully!");
+                    } else {
+                        System.out.println("❌ Failed to remove budget.");
+                    }
+                } else {
+                    System.out.println("❌ Deletion cancelled.");
+                }
+            }
+            case 3 -> System.out.println("❌ Cancelled.");
+            default -> System.out.println("❌ Invalid choice.");
+        }
+
+        double totalBudget = budgetService.getTotalBudget(user);
+        System.out.println("🧮 Updated TOTAL monthly budget: ₹" + totalBudget);
+    }
+
+    // ===================== CATEGORY SELECT =====================
 
     private Category chooseCategoryFromMenu() {
         while (true) {
             List<Category> categories = categoryService.getAllCategories();
 
+            System.out.println("\n📂 --- Choose Category ---");
+
             if (categories.isEmpty()) {
-                System.out.println("⚠️ No categories found. Please add one.");
-                System.out.print("Enter new category name: ");
-                String name = scanner.nextLine();
+                String name = readNonEmptyString("⚠️ No categories exist. Enter name to create: ");
                 categoryService.addCategory(name);
                 continue;
             }
 
-            System.out.println("\nAvailable Categories:");
             for (int i = 0; i < categories.size(); i++) {
                 System.out.println((i + 1) + ". " + categories.get(i).getCategoryName());
             }
             System.out.println("0. ➕ Add NEW Category");
-            System.out.println("-1. Cancel");
+            System.out.println("-1. ❌ Cancel");
 
-            System.out.print("Choose category: ");
-            int choice;
-            try {
-                choice = Integer.parseInt(scanner.nextLine());
-            } catch (NumberFormatException e) {
-                System.out.println("❌ Please enter a valid number.");
-                continue;
-            }
+            int choice = readInt("➡ Choose: ");
 
-            if (choice == -1) {
-                return null;
-            }
-
+            if (choice == -1) return null;
             if (choice == 0) {
-                System.out.print("Enter new category name: ");
-                String name = scanner.nextLine();
+                String name = readNonEmptyString("➕ Enter category name: ");
                 categoryService.addCategory(name);
-                continue; // reload list
-            }
-
-            if (choice < 1 || choice > categories.size()) {
-                System.out.println("❌ Invalid selection.");
                 continue;
             }
+            if (choice >= 1 && choice <= categories.size()) {
+                return categories.get(choice - 1);
+            }
 
-            return categories.get(choice - 1);
+            System.out.println("❌ Invalid choice. Try again.");
         }
     }
 
-    private void handleEditBudget(User user) {
-        // Reuse the same category menu
-        Category category = chooseCategoryFromMenu();
-        if (category == null) {
-            System.out.println("No category selected.");
-            return;
-        }
-
-        System.out.print("Enter new MONTHLY budget for " +
-                category.getCategoryName() + ": ");
-        double newAmount;
-        try {
-            newAmount = Double.parseDouble(scanner.nextLine());
-        } catch (NumberFormatException e) {
-            System.out.println("❌ Invalid amount.");
-            return;
-        }
-
-        budgetService.updateBudget(user, category, newAmount);
-
-        double total = budgetService.getTotalBudget(user);
-        System.out.println("Total monthly budget now: " + total);
-    }
+    // ===================== SAVINGS MENU (Option 4) =====================
 
     private void handleSavingsMenu(User user) {
-        System.out.print("Enter savings goal amount: ");
-        double amount;
-        try {
-            amount = Double.parseDouble(scanner.nextLine());
-        } catch (NumberFormatException e) {
-            System.out.println("❌ Invalid amount.");
+        System.out.println("\n🎯 Savings Goals");
+
+        // 1️⃣ Show existing goals
+        savingsGoalService.displaySavingsGoal(user);
+
+        // 2️⃣ Ask if want to add new goal
+        System.out.print("\n➕ Do you want to ADD a new savings goal? (yes/no): ");
+        String ans = scanner.nextLine().trim().toLowerCase();
+        if (!ans.equals("yes")) {
+            System.out.println("ℹ️ No new savings goals added.");
             return;
         }
 
-        System.out.print("Enter timeframe in months: ");
-        int months;
-        try {
-            months = Integer.parseInt(scanner.nextLine());
-        } catch (NumberFormatException e) {
-            System.out.println("❌ Invalid number of months.");
-            return;
-        }
+        // 3️⃣ Add new goal
+        double amount = readPositiveDouble("💰 Enter savings goal amount: ");
+        int months = readPositiveInt("📅 Enter timeframe (months): ");
 
         savingsGoalService.setSavingsGoal(user, amount, months);
+
+        // 4️⃣ Show updated list
         savingsGoalService.displaySavingsGoal(user);
     }
 
+    // ===================== LOAN MENU (Option 5) =====================
+
     private void handleLoanMenu(User user) {
-        System.out.print("Enter loan amount: ");
-        double amount;
-        try {
-            amount = Double.parseDouble(scanner.nextLine());
-        } catch (NumberFormatException e) {
-            System.out.println("❌ Invalid amount.");
+        System.out.println("\n🏦 Loan Management");
+
+        // 1️⃣ Show existing loans from DB
+        showExistingLoans(user);
+
+        // 2️⃣ Ask if they want to add a new one
+        System.out.print("\n➕ Do you want to add a NEW loan? (yes/no): ");
+        String ans = scanner.nextLine().trim().toLowerCase();
+        if (!ans.equals("yes")) {
+            System.out.println("ℹ️ No new loans added.");
             return;
         }
 
-        System.out.print("Enter interest rate (% per year): ");
-        double rate;
-        try {
-            rate = Double.parseDouble(scanner.nextLine());
-        } catch (NumberFormatException e) {
-            System.out.println("❌ Invalid rate.");
-            return;
-        }
-
-        System.out.print("Enter repayment months: ");
-        int months;
-        try {
-            months = Integer.parseInt(scanner.nextLine());
-        } catch (NumberFormatException e) {
-            System.out.println("❌ Invalid number of months.");
-            return;
-        }
+        // 3️⃣ Add new loan
+        double amount = readPositiveDouble("💰 Loan amount: ");
+        double rate = readNonNegativeDouble("📈 Interest rate (% per year): ");
+        int months = readPositiveInt("📅 Repayment months: ");
 
         loanService.addLoan(user, amount, rate, months);
     }
 
+    private void showExistingLoans(User user) {
+        String sql = "SELECT principal, interest_rate, repayment_months, monthly_repayment " +
+                "FROM loans WHERE user_id = ?";
+
+        System.out.println("\n📜 Your existing loans:");
+
+        try (Connection conn = DBConnUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, user.getId());
+
+            try (ResultSet rs = ps.executeQuery()) {
+                boolean any = false;
+
+                System.out.printf("%-12s %-10s %-10s %-15s%n",
+                        "Principal", "Rate%", "Months", "Monthly EMI");
+                System.out.println("-------------------------------------------------");
+
+                while (rs.next()) {
+                    any = true;
+                    double principal = rs.getDouble("principal");
+                    double rate = rs.getDouble("interest_rate");
+                    int months = rs.getInt("repayment_months");
+                    double emi = rs.getDouble("monthly_repayment");
+
+                    System.out.printf("%-12.2f %-10.2f %-10d %-15.2f%n",
+                            principal, rate, months, emi);
+                }
+
+                if (!any) {
+                    System.out.println("ℹ️ You currently have no loans recorded.");
+                }
+
+            }
+
+        } catch (SQLException e) {
+            System.out.println("❌ Error loading existing loans.");
+            e.printStackTrace();
+        }
+    }
+
+    // ===================== EXIT =====================
+
     @Override
     public void exitApplication() {
-        System.out.println("Exiting application. Goodbye!");
+        System.out.println("\n👋 Thanks for using the Budget App. Goodbye!");
+        System.exit(0);
+    }
+
+    // ===================== INPUT HELPERS =====================
+
+    private int readInt(String prompt) {
+        while (true) {
+            System.out.print(prompt);
+            try {
+                return Integer.parseInt(scanner.nextLine().trim());
+            } catch (Exception e) {
+                System.out.println("❌ Invalid number. Try again.");
+            }
+        }
+    }
+
+    private int readPositiveInt(String prompt) {
+        while (true) {
+            int x = readInt(prompt);
+            if (x > 0) return x;
+            System.out.println("⚠️ Must be greater than 0.");
+        }
+    }
+
+    private double readPositiveDouble(String prompt) {
+        while (true) {
+            System.out.print(prompt);
+            try {
+                double x = Double.parseDouble(scanner.nextLine().trim());
+                if (x > 0) return x;
+                System.out.println("⚠️ Must be greater than 0.");
+            } catch (Exception e) {
+                System.out.println("❌ Invalid number. Try again.");
+            }
+        }
+    }
+
+    private double readNonNegativeDouble(String prompt) {
+        while (true) {
+            System.out.print(prompt);
+            try {
+                double x = Double.parseDouble(scanner.nextLine().trim());
+                if (x >= 0) return x;
+                System.out.println("⚠️ Must be 0 or more.");
+            } catch (Exception e) {
+                System.out.println("❌ Invalid number. Try again.");
+            }
+        }
+    }
+
+    private String readNonEmptyString(String prompt) {
+        while (true) {
+            System.out.print(prompt);
+            String s = scanner.nextLine().trim();
+            if (!s.isEmpty()) return s;
+            System.out.println("⚠️ Input can't be empty!");
+        }
     }
 }

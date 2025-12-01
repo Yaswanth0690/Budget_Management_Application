@@ -57,6 +57,7 @@ public class User {
         this.notificationSettings = notificationSettings;
     }
 
+
     @Override
     public String toString() {
         return "User{" +
