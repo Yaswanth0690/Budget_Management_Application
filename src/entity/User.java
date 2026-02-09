@@ -7,7 +7,7 @@ public class User {
     private int id;                     // DB Primary Key
     private String userId;              // Generated UID (e.g. ABC123)
     private String userName;
-
+    private String password;
     private List<Budget> budgets;
     private List<Expense> expenses;
     private List<Loan> loans;
@@ -39,6 +39,9 @@ public class User {
 
     public String getUserName() { return userName; }
     public void setUserName(String userName) { this.userName = userName; }
+
+    public String getPassword() { return password; }
+    public void setPassword(String password) { this.password = password; }
 
     public List<Budget> getBudgets() { return budgets; }
     public void setBudgets(List<Budget> budgets) { this.budgets = budgets; }

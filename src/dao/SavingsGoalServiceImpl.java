@@ -11,11 +11,20 @@ import java.sql.SQLException;
 
 public class SavingsGoalServiceImpl implements SavingsGoalService {
 
+    // -----------------------------
+    // ADD SAVINGS GOAL
+    // -----------------------------
     @Override
     public void setSavingsGoal(User user, double amount, int months) {
+
+        if (months <= 0) {
+            System.out.println("❌ Months must be greater than 0.");
+            return;
+        }
+
         double monthlyRequired = calculateMonthlySavingsRequired(amount, months);
 
-        String sql = "INSERT INTO savings_goals (user_id, amount, months) VALUES (?, ?, ?)";
+        String sql = "INSERT INTO savings_goals (user_id, amount, months, monthly_amount) VALUES (?, ?, ?, ?)";
 
         try (Connection conn = DBConnUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -23,6 +32,7 @@ public class SavingsGoalServiceImpl implements SavingsGoalService {
             ps.setInt(1, user.getId());
             ps.setDouble(2, amount);
             ps.setInt(3, months);
+            ps.setDouble(4, monthlyRequired);
 
             ps.executeUpdate();
 
@@ -36,15 +46,21 @@ public class SavingsGoalServiceImpl implements SavingsGoalService {
         }
     }
 
+    // -----------------------------
+    // CALCULATE MONTHLY REQUIRED
+    // -----------------------------
     @Override
     public double calculateMonthlySavingsRequired(double totalGoal, int months) {
-        if (months <= 0) return totalGoal;
         return totalGoal / months;
     }
 
+    // -----------------------------
+    // DISPLAY SAVINGS GOALS
+    // -----------------------------
     @Override
     public void displaySavingsGoal(User user) {
-        String sql = "SELECT amount, months FROM savings_goals WHERE user_id = ? ORDER BY months ASC";
+
+        String sql = "SELECT amount, months, monthly_amount FROM savings_goals WHERE user_id = ? ORDER BY months ASC";
 
         System.out.println("\n📜 Your Savings Goals:");
 
@@ -54,6 +70,7 @@ public class SavingsGoalServiceImpl implements SavingsGoalService {
             ps.setInt(1, user.getId());
 
             try (ResultSet rs = ps.executeQuery()) {
+
                 boolean found = false;
 
                 System.out.printf("%-5s %-12s %-10s %-15s%n",
@@ -61,11 +78,14 @@ public class SavingsGoalServiceImpl implements SavingsGoalService {
                 System.out.println("------------------------------------------------");
 
                 int index = 1;
+
                 while (rs.next()) {
+
                     found = true;
+
                     double amount = rs.getDouble("amount");
                     int months = rs.getInt("months");
-                    double monthly = calculateMonthlySavingsRequired(amount, months);
+                    double monthly = rs.getDouble("monthly_amount");
 
                     System.out.printf("%-5d %-12.2f %-10d %-15.2f%n",
                             index++, amount, months, monthly);
@@ -74,7 +94,6 @@ public class SavingsGoalServiceImpl implements SavingsGoalService {
                 if (!found) {
                     System.out.println("ℹ️ You have no savings goals yet.");
                 }
-
             }
 
         } catch (SQLException e) {
